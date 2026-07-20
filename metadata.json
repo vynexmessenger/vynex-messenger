@@ -1,0 +1,6 @@
+{
+  "name": "Vynex Messenger",
+  "description": "Vynex is a premium one-to-one secure messaging platform focused on speed, privacy, simplicity, and reliability.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

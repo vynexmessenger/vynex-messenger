@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "430199466460",
+    "project_id": "vynex-mess-app",
+    "storage_bucket": "vynex-mess-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:430199466460:android:9784d62f4b6af9d5b08719",
+        "android_client_info": {
+          "package_name": "com.vynex.messenger"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAppH6VAMBRNV04YfPWl_18jFzPU2xHS0I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
