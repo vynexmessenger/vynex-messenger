@@ -1,6 +1,7 @@
 package com.example.ui.auth
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -48,6 +49,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 fun RegisterScreen(
     viewModel: AuthViewModel,
     onNavigateToLogin: () -> Unit,
+    onNavigateToTerms: () -> Unit = {},
     onRegisterSuccess: () -> Unit
 ) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
@@ -130,20 +132,12 @@ fun RegisterScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(bottom = 32.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.PersonAdd,
-                    contentDescription = "Logo",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(40.dp)
-                )
-            }
+            Icon(
+                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_vynex_logo),
+                contentDescription = "Vynex Logo",
+                modifier = Modifier.size(64.dp),
+                tint = androidx.compose.ui.graphics.Color.Unspecified
+            )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = "Create Account",
@@ -305,6 +299,26 @@ fun RegisterScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "By signing up, you agree to our ",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Terms & Conditions",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { onNavigateToTerms() }
+                )
+            }
+
             Button(
                 onClick = { 
                     viewModel.register(username, dob, password, confirmPassword, pin, onRegisterSuccess) 

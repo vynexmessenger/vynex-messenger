@@ -37,10 +37,20 @@ object Destinations {
     const val SEARCH = "search"
     const val PROFILE = "profile"
     const val CHAT = "chat/{chatId}/{otherUserId}"
+    const val OTHER_PROFILE = "other_profile/{userId}"
+    const val BLOCKED_USERS = "blocked_users"
+    const val PRIVATE_LOCK = "private_lock"
+    const val PRIVATE_CHATS = "private_chats"
+    const val TERMS = "terms"
 }
 
 @Composable
-fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOtherUserId: String? = null) {
+fun VynexApp(
+    container: AppContainer,
+    initialChatId: String? = null,
+    initialOtherUserId: String? = null,
+    onIntentHandled: () -> Unit = {}
+) {
     val navController = rememberNavController()
     
     val authViewModel: AuthViewModel = viewModel(
@@ -54,10 +64,57 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
     val authState by authViewModel.authState.collectAsState()
     
     var isAppLocked by remember { mutableStateOf(false) }
+    var hasUnlockedThisSession by remember { mutableStateOf(false) }
     var splashFinished by remember { mutableStateOf(false) }
+
+    var pendingPrivateChatId by remember { mutableStateOf<String?>(null) }
+    var pendingPrivateOtherUserId by remember { mutableStateOf<String?>(null) }
+
+    fun openChatSecurely(chatId: String, otherUserId: String?) {
+        val currentUserId = authState.user?.uid ?: ""
+        val targetOtherUserId = otherUserId ?: ""
+        val isPrivateInSettings = chatViewModel.chatState.value.chatSettings[chatId]?.isPrivate == true
+        val isPrivateInChat = chatViewModel.chatState.value.chats.any { it.id == chatId && it.privateBy.contains(currentUserId) }
+        val isLocallyPrivate = try {
+            kotlinx.coroutines.runBlocking {
+                container.appPreferences.isChatPrivate(chatId, currentUserId)
+            }
+        } catch (e: Exception) {
+            false
+        }
+
+        val isPrivate = isPrivateInSettings || isPrivateInChat || isLocallyPrivate
+
+        if (!isPrivate) {
+            navController.navigate("chat/$chatId/$targetOtherUserId")
+            return
+        }
+
+        if (com.example.data.security.PrivateChatSecurityManager.isUnlocked.value) {
+            navController.navigate("chat/$chatId/$targetOtherUserId")
+            return
+        }
+
+        // Chat is private and locked: remember destination and navigate to PIN lock
+        pendingPrivateChatId = chatId
+        pendingPrivateOtherUserId = targetOtherUserId
+        navController.navigate(Destinations.PRIVATE_LOCK)
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(authState.user?.settings?.appLockEnabled) {
+        val activity = context as? android.app.Activity
+        if (activity != null) {
+            if (authState.user?.settings?.appLockEnabled == true && !com.example.BuildConfig.DEBUG) {
+                activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
+    }
     
     DisposableEffect(lifecycleOwner, authState.user) {
         val observer = LifecycleEventObserver { _, event ->
@@ -79,6 +136,9 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
     LaunchedEffect(authState.user) {
         if (authState.user == null) {
             isAppLocked = false
+            hasUnlockedThisSession = false
+        } else if (authState.user?.settings?.appLockEnabled == true && !hasUnlockedThisSession) {
+            isAppLocked = true
         }
     }
 
@@ -92,11 +152,9 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
                 navController.navigate(Destinations.HOME) {
                     popUpTo(0) { inclusive = true }
                 }
-                if (authState.user!!.settings.appLockEnabled) {
+                if (authState.user!!.settings.appLockEnabled && !hasUnlockedThisSession) {
                     isAppLocked = true
                 }
-                
-
             }
         } else {
             if (currentRoute != Destinations.LOGIN && currentRoute != Destinations.REGISTER && currentRoute != Destinations.RECOVERY) {
@@ -108,8 +166,11 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
     }
 
     LaunchedEffect(initialChatId, initialOtherUserId, splashFinished, authState.user) {
-        if (splashFinished && authState.user != null && initialChatId != null && initialOtherUserId != null) {
-            navController.navigate("chat/$initialChatId/$initialOtherUserId")
+        if (splashFinished && authState.user != null && !initialChatId.isNullOrBlank()) {
+            val chatId = initialChatId
+            val otherUserId = initialOtherUserId
+            onIntentHandled()
+            openChatSecurely(chatId, otherUserId)
         }
     }
 
@@ -143,6 +204,9 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
                     onNavigateToLogin = {
                         navController.popBackStack()
                     },
+                    onNavigateToTerms = {
+                        navController.navigate(Destinations.TERMS)
+                    },
                     onRegisterSuccess = {
                         // Handled by LaunchedEffect
                     }
@@ -171,8 +235,15 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
                     onNavigateToProfile = {
                         navController.navigate(Destinations.PROFILE)
                     },
+                    onNavigateToPrivateChats = {
+                        if (com.example.data.security.PrivateChatSecurityManager.isUnlocked.value) {
+                            navController.navigate(Destinations.PRIVATE_CHATS)
+                        } else {
+                            navController.navigate(Destinations.PRIVATE_LOCK)
+                        }
+                    },
                     onNavigateToChat = { chatId, otherUserId ->
-                        navController.navigate("chat/$chatId/$otherUserId")
+                        openChatSecurely(chatId, otherUserId)
                     }
                 )
             }
@@ -184,7 +255,7 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
                         navController.popBackStack()
                     },
                     onNavigateToChat = { chatId, otherUserId ->
-                        navController.navigate("chat/$chatId/$otherUserId")
+                        openChatSecurely(chatId, otherUserId)
                     }
                 )
             }
@@ -207,13 +278,64 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
             ) { backStackEntry ->
                 val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
                 val otherUserId = backStackEntry.arguments?.getString("otherUserId") ?: ""
-                val currentUserId = authState.user?.uid ?: ""
-                
-                ChatScreen(
-                    viewModel = chatViewModel,
-                    chatId = chatId,
-                    otherUserId = otherUserId,
-                    currentUserId = currentUserId,
+                val currentUserId = authState.user?.uid ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+
+                val isPrivateInSettings = chatViewModel.chatState.value.chatSettings[chatId]?.isPrivate == true
+                val isPrivateInChat = chatViewModel.chatState.value.chats.any { it.id == chatId && it.privateBy.contains(currentUserId) }
+                val isLocallyPrivate = remember(chatId, currentUserId) {
+                    try {
+                        kotlinx.coroutines.runBlocking { container.appPreferences.isChatPrivate(chatId, currentUserId) }
+                    } catch (e: Exception) {
+                        false
+                    }
+                }
+                val isPrivate = isPrivateInSettings || isPrivateInChat || isLocallyPrivate
+                val isUnlocked by com.example.data.security.PrivateChatSecurityManager.isUnlocked.collectAsState()
+
+                // Security guard: If private and locked, redirect immediately to PIN lock
+                LaunchedEffect(chatId, isPrivate, isUnlocked) {
+                    if (isPrivate && !isUnlocked) {
+                        navController.popBackStack()
+                        openChatSecurely(chatId, otherUserId)
+                    }
+                }
+
+                if (isPrivate && !isUnlocked) {
+                    Box(modifier = Modifier.fillMaxSize())
+                } else {
+                    val otherUser = chatViewModel.chatState.value.userMap[otherUserId] ?: chatViewModel.chatState.value.otherUser
+                    val amIBlocked = otherUser?.settings?.blockedUsers?.contains(currentUserId) == true
+                    val isBlockedByMe = authState.user?.settings?.blockedUsers?.contains(otherUserId) == true
+                    val isBlocked = isBlockedByMe || amIBlocked
+                    val readReceiptsEnabled = authState.user?.settings?.readReceiptsEnabled ?: true
+                    ChatScreen(
+                        viewModel = chatViewModel,
+                        chatId = chatId,
+                        otherUserId = otherUserId,
+                        currentUserId = currentUserId,
+                        isBlocked = isBlocked,
+                        readReceiptsEnabled = readReceiptsEnabled,
+                        onNavigateBack = {
+                            navController.popBackStack()
+                        },
+                        onNavigateToProfile = { uid ->
+                            navController.navigate("other_profile/$uid")
+                        }
+                    )
+                }
+            }
+
+            composable(
+                route = Destinations.OTHER_PROFILE,
+                arguments = listOf(
+                    navArgument("userId") { type = NavType.StringType }
+                )
+            ) { backStackEntry ->
+                val userId = backStackEntry.arguments?.getString("userId") ?: ""
+                com.example.ui.home.OtherUserProfileScreen(
+                    userId = userId,
+                    chatViewModel = chatViewModel,
+                    authViewModel = authViewModel,
                     onNavigateBack = {
                         navController.popBackStack()
                     }
@@ -226,8 +348,73 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
                     onNavigateBack = {
                         navController.popBackStack()
                     },
+                    onNavigateToBlockedUsers = {
+                        navController.navigate(Destinations.BLOCKED_USERS)
+                    },
+                    onNavigateToTerms = {
+                        navController.navigate(Destinations.TERMS)
+                    },
                     onLogout = {
                         // Handled by LaunchedEffect
+                    }
+                )
+            }
+            
+            composable(Destinations.BLOCKED_USERS) {
+                com.example.ui.home.BlockedUsersScreen(
+                    authViewModel = authViewModel,
+                    chatViewModel = chatViewModel,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            composable(Destinations.PRIVATE_LOCK) {
+                com.example.ui.auth.PrivateLockScreen(
+                    currentUserId = authState.user?.uid ?: "",
+                    authViewModel = authViewModel,
+                    onNavigateBack = {
+                        pendingPrivateChatId = null
+                        pendingPrivateOtherUserId = null
+                        navController.popBackStack()
+                    },
+                    onUnlockSuccess = {
+                        val targetChatId = pendingPrivateChatId
+                        val targetOtherUserId = pendingPrivateOtherUserId
+                        pendingPrivateChatId = null
+                        pendingPrivateOtherUserId = null
+
+                        if (targetChatId != null) {
+                            navController.navigate("chat/$targetChatId/${targetOtherUserId ?: ""}") {
+                                popUpTo(Destinations.HOME)
+                            }
+                        } else {
+                            navController.navigate(Destinations.PRIVATE_CHATS) {
+                                popUpTo(Destinations.HOME)
+                            }
+                        }
+                    }
+                )
+            }
+
+            composable(Destinations.PRIVATE_CHATS) {
+                com.example.ui.chat.PrivateChatsScreen(
+                    currentUserId = authState.user?.uid ?: "",
+                    chatViewModel = chatViewModel,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onNavigateToChat = { chatId, otherUserId ->
+                        navController.navigate("chat/$chatId/$otherUserId")
+                    }
+                )
+            }
+
+            composable(Destinations.TERMS) {
+                com.example.ui.home.TermsAndConditionsScreen(
+                    onNavigateBack = {
+                        navController.popBackStack()
                     }
                 )
             }
@@ -235,12 +422,15 @@ fun VynexApp(container: AppContainer, initialChatId: String? = null, initialOthe
         
         AnimatedVisibility(
             visible = isAppLocked && splashFinished,
-            enter = fadeIn(),
-            exit = fadeOut()
+            enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(300)),
+            exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(400))
         ) {
             AppLockScreen(
                 viewModel = authViewModel,
-                onUnlockSuccess = { isAppLocked = false }
+                onUnlockSuccess = { 
+                    isAppLocked = false 
+                    hasUnlockedThisSession = true
+                }
             )
         }
     }

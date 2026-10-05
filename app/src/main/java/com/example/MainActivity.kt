@@ -12,9 +12,15 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import android.content.Context
+import android.app.NotificationManager
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -25,6 +31,7 @@ class MainActivity : ComponentActivity() {
     private val intentData = MutableStateFlow<Pair<String?, String?>>(Pair(null, null))
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
@@ -41,7 +48,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             val intentDataState by intentData.collectAsState()
             MyApplicationTheme {
-                VynexApp(appContainer, intentDataState.first, intentDataState.second)
+                VynexApp(
+                    container = appContainer,
+                    initialChatId = intentDataState.first,
+                    initialOtherUserId = intentDataState.second,
+                    onIntentHandled = {
+                        intentData.value = Pair(null, null)
+                    }
+                )
             }
         }
     }
@@ -50,6 +64,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         ActiveChatTracker.isAppInForeground = true
+        clearPrivacyNotifications()
     }
 
     override fun onPause() {
@@ -65,10 +80,31 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent) {
         val chatId = intent.getStringExtra("chatId")
         val senderId = intent.getStringExtra("senderId")
-        if (chatId != null && senderId != null) {
-            intentData.value = Pair(chatId, senderId)
+        if (!chatId.isNullOrBlank()) {
+            intentData.value = Pair(chatId, senderId ?: "")
             intent.removeExtra("chatId")
             intent.removeExtra("senderId")
+        }
+        val isPrivacy = intent.getBooleanExtra("isPrivacyNotification", false)
+        if (isPrivacy) {
+            intent.removeExtra("isPrivacyNotification")
+        }
+        clearPrivacyNotifications()
+    }
+
+    private fun clearPrivacyNotifications() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                com.example.data.local.AppPreferences(applicationContext).resetNotificationCount()
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancel(MyFirebaseMessagingService.PRIVACY_NOTIFICATION_ID)
+        } catch (e: Exception) {
+            // ignore
         }
     }
 }

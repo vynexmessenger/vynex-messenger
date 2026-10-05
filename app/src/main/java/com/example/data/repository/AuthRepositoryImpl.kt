@@ -13,6 +13,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 class AuthRepositoryImpl(
@@ -41,7 +42,17 @@ class AuthRepositoryImpl(
                             return@addSnapshotListener
                         }
                         if (snapshot != null && snapshot.exists()) {
-                            trySend(snapshot.toObject(User::class.java))
+                            val userObj = snapshot.toObject(User::class.java)
+                            if (userObj != null) {
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                    try {
+                                        appPreferences.setShowMessageContent(userObj.settings.showMessageContent, userObj.uid)
+                                    } catch (e: Exception) {
+                                        // ignore
+                                    }
+                                }
+                            }
+                            trySend(userObj)
                         } else {
                             trySend(null)
                         }
@@ -80,14 +91,28 @@ class AuthRepositoryImpl(
 
             // Save session
             appPreferences.saveSession(uid)
+            try {
+                appPreferences.setShowMessageContent(user.settings.showMessageContent, uid)
+            } catch (e: Exception) {
+                // ignore
+            }
+
+            val loginUpdates = mutableMapOf<String, Any>(
+                "isOnline" to true,
+                "lastSeen" to System.currentTimeMillis()
+            )
+
+            val token = getFcmTokenSafe()
+            if (token != null) {
+                Log.d("FCM_AUDIT", "[ANDROID] Token fetched on login: $token")
+                loginUpdates["fcmToken"] = token
+            }
 
             try {
-                val token = FirebaseMessaging.getInstance().getToken().await()
-                Log.d("FCM_AUDIT", "[ANDROID] Token fetched on login: $token")
-                firestore.collection("users").document(uid).set(mapOf("fcmToken" to token), SetOptions.merge()).await()
-                Log.d("FCM_AUDIT", "[ANDROID] Token successfully uploaded to Firestore on login.")
+                firestore.collection("users").document(uid).set(loginUpdates, SetOptions.merge()).await()
+                Log.d("FCM_AUDIT", "[ANDROID] Status and token successfully uploaded to Firestore on login.")
             } catch (e: Exception) {
-                Log.e("FCM_AUDIT", "[ANDROID] Failed to fetch/upload token on login: ${e.message}", e)
+                Log.e("AuthRepository", "Failed to update online status on login: ${e.message}", e)
             }
 
             Result.Success(user)
@@ -131,7 +156,9 @@ class AuthRepositoryImpl(
                 securityPin = hashedPin,
                 passwordHash = hashedPassword,
                 createdAt = now,
-                updatedAt = now
+                updatedAt = now,
+                isOnline = true,
+                lastSeen = now
             )
 
             // 2. Save to users collection
@@ -147,13 +174,15 @@ class AuthRepositoryImpl(
             // 4. Save session
             appPreferences.saveSession(uid)
 
-            try {
-                val token = FirebaseMessaging.getInstance().getToken().await()
+            val token = getFcmTokenSafe()
+            if (token != null) {
                 Log.d("FCM_AUDIT", "[ANDROID] Token fetched on register: $token")
-                firestore.collection("users").document(uid).set(mapOf("fcmToken" to token), SetOptions.merge()).await()
-                Log.d("FCM_AUDIT", "[ANDROID] Token successfully uploaded to Firestore on register.")
-            } catch (e: Exception) {
-                Log.e("FCM_AUDIT", "[ANDROID] Failed to fetch/upload token on register: ${e.message}", e)
+                try {
+                    firestore.collection("users").document(uid).set(mapOf("fcmToken" to token), SetOptions.merge()).await()
+                    Log.d("FCM_AUDIT", "[ANDROID] Token successfully uploaded to Firestore on register.")
+                } catch (e: Exception) {
+                    Log.e("FCM_AUDIT", "[ANDROID] Failed to upload token on register: ${e.message}", e)
+                }
             }
 
             Result.Success(user)
@@ -167,6 +196,19 @@ class AuthRepositoryImpl(
 
     override suspend fun logout(): Result<Unit> {
         return try {
+            val uid = auth.currentUser?.uid
+            if (uid != null) {
+                try {
+                    val updates = mapOf(
+                        "isOnline" to false,
+                        "lastSeen" to System.currentTimeMillis(),
+                        "activeSessions" to emptyMap<String, Long>()
+                    )
+                    firestore.collection("users").document(uid).set(updates, SetOptions.merge()).await()
+                } catch (e: Exception) {
+                    Log.e("AuthRepository", "Failed to update offline status on logout: ${e.message}")
+                }
+            }
             auth.signOut()
             appPreferences.clearSession()
             Result.Success(Unit)
@@ -195,26 +237,36 @@ class AuthRepositoryImpl(
         return try {
             val user = auth.currentUser ?: return Result.Error("Not logged in")
             val uid = user.uid
+            val email = user.email
             
             // Get user to find their username
             val userDoc = firestore.collection("users").document(uid).get().await()
             val username = userDoc.getString("username")
             
-            // Delete data
+            // Re-authenticate user before deleting to avoid "Recent Login Required" error
+            if (email != null) {
+                try {
+                    val credential = com.google.firebase.auth.EmailAuthProvider.getCredential(email, AUTH_SECRET)
+                    user.reauthenticate(credential).await()
+                } catch (reAuthEx: Exception) {
+                    Log.e("AuthRepository", "Re-authentication failed: ${reAuthEx.message}")
+                }
+            }
+            
+            // Delete data from usernames mapping
             if (username != null) {
                 firestore.collection("usernames").document(username.removePrefix("@")).delete().await()
             }
             
-            // Remove user from chats
+            // Remove typing status from chats instead of deleting the chats
             val chatsSnapshot = firestore.collection("chats")
                 .whereArrayContains("participants", uid)
                 .get().await()
             for (chatDoc in chatsSnapshot.documents) {
-                // If it's a 1 on 1 chat, we can just delete the whole chat or remove participation.
-                // Let's delete the chat completely to leave no trace as requested for privacy/deletion.
-                chatDoc.reference.delete().await()
+                chatDoc.reference.update("typing.$uid", com.google.firebase.firestore.FieldValue.delete()).await()
             }
             
+            // Delete the Firestore user document (which contains profile, bio, fcmToken, online status, settings, etc.)
             firestore.collection("users").document(uid).delete().await()
             
             // Delete auth user
@@ -311,5 +363,27 @@ class AuthRepositoryImpl(
         }
     }
 
+    companion object {
+        @Volatile
+        private var fcmRegistrationDisabled = false
+    }
+
+    private suspend fun getFcmTokenSafe(): String? {
+        if (fcmRegistrationDisabled) return null
+        return try {
+            val context = com.google.firebase.FirebaseApp.getInstance().applicationContext
+            val playServicesCode = com.google.android.gms.common.GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context)
+            if (playServicesCode != com.google.android.gms.common.ConnectionResult.SUCCESS) {
+                Log.w("FCM_AUDIT", "Google Play Services unavailable ($playServicesCode). Skipping FCM token.")
+                fcmRegistrationDisabled = true
+                return null
+            }
+            FirebaseMessaging.getInstance().token.await()
+        } catch (e: Throwable) {
+            Log.w("FCM_AUDIT", "FCM token retrieval skipped: ${e.message}")
+            fcmRegistrationDisabled = true
+            null
+        }
+    }
 
 }

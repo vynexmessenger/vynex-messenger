@@ -11,6 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,9 +36,43 @@ fun SearchScreen(
     val chatState by chatViewModel.chatState.collectAsStateWithLifecycle()
     var searchQuery by remember { mutableStateOf("") }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sharedPrefs = remember { context.getSharedPreferences("vynex_search_history", android.content.Context.MODE_PRIVATE) }
+    var searchHistory by remember { 
+        mutableStateOf(
+            sharedPrefs.getString("history", "")?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
+        ) 
+    }
+
+    val saveHistory = { newHistory: List<String> ->
+        searchHistory = newHistory
+        sharedPrefs.edit().putString("history", newHistory.joinToString(",")).apply()
+    }
+
+    val addToHistory = { query: String ->
+        if (query.isNotBlank()) {
+            val clean = query.trim().removePrefix("@")
+            if (clean.isNotEmpty()) {
+                val updated = (listOf(clean) + searchHistory).distinct().take(10)
+                saveHistory(updated)
+            }
+        }
+    }
+
+    val removeFromHistory = { query: String ->
+        val updated = searchHistory.filter { it != query }
+        saveHistory(updated)
+    }
+
+    val clearHistory = {
+        saveHistory(emptyList())
+    }
+
     LaunchedEffect(Unit) {
         chatViewModel.clearSearch()
     }
+
+    val cleanQuery = searchQuery.trim().trimStart('@')
 
     Scaffold(
         topBar = {
@@ -101,22 +137,138 @@ fun SearchScreen(
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
-            } else if (chatState.searchResults.isEmpty() && searchQuery.isNotEmpty()) {
-                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+            } else if (cleanQuery.isEmpty()) {
+                if (searchHistory.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Recent Searches",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            TextButton(onClick = { clearHistory() }) {
+                                Text("Clear All", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                            items(searchHistory) { item ->
+                                val formattedItem = if (item.startsWith("@")) item else "@$item"
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            searchQuery = formattedItem
+                                            chatViewModel.searchUsers(formattedItem)
+                                        }
+                                        .padding(vertical = 12.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = androidx.compose.material.icons.Icons.Default.Schedule,
+                                            contentDescription = "History Icon",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text(
+                                            text = formattedItem,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onBackground
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { removeFromHistory(item) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            }
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Search,
+                            contentDescription = "Search",
+                            modifier = Modifier.size(80.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Search Vynex",
+                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Find friends by typing their usernames.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            } else if (chatState.searchResults.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "No Results",
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "No users found",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "We couldn't find any users matching \"@$cleanQuery\". Try checking the spelling.",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyLarge
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
             } else if (chatState.searchResults.isNotEmpty()) {
-                Log.d("SearchAudit", "SearchScreen: chatState.searchResults is NOT empty. Size: ${chatState.searchResults.size}")
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(chatState.searchResults) { searchUser ->
-                        Log.d("SearchAudit", "SearchScreen: Rendering SearchUserItem for ${searchUser.username}")
                         SearchUserItem(
                             user = searchUser,
                             onClick = {
+                                addToHistory(searchUser.canonicalUsername)
                                 chatViewModel.startOrGetChat(searchUser.uid) { chatId ->
                                     chatViewModel.clearSearch()
                                     onNavigateToChat(chatId, searchUser.uid)
@@ -132,6 +284,13 @@ fun SearchScreen(
 
 @Composable
 fun SearchUserItem(user: User, onClick: () -> Unit) {
+    val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+    val amIBlocked = user.settings.blockedUsers.contains(currentUserId)
+    
+    val displayName = if (amIBlocked) user.canonicalUsername else user.displayName.ifEmpty { user.canonicalUsername }
+    val profilePhoto = if (amIBlocked) null else user.profilePhoto
+    val bio = if (amIBlocked) "" else user.bio
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -139,24 +298,24 @@ fun SearchUserItem(user: User, onClick: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AvatarImage(displayName = user.displayName.ifEmpty { user.username }, username = user.username, size = 56, profilePhoto = user.profilePhoto)
+        AvatarImage(displayName = displayName, username = user.canonicalUsername, size = 56, profilePhoto = profilePhoto)
         
         Spacer(modifier = Modifier.width(16.dp))
         
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = user.displayName.ifEmpty { user.username },
+                text = displayName,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-                text = user.username,
+                text = user.canonicalUsername,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )
-            if (user.bio.isNotEmpty()) {
+            if (bio.isNotEmpty()) {
                 Text(
-                    text = user.bio,
+                    text = bio,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

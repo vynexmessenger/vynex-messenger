@@ -103,10 +103,10 @@ async function sendToUser(messageData) {
       
       const db = admin.firestore();
       
-      const senderDoc = await db.collection("users").document(senderId).get();
+      const senderDoc = await db.collection("users").doc(senderId).get();
       const senderName = senderDoc.exists ? (senderDoc.data().displayName || senderDoc.data().username) : "New Message";
 
-      const receiverDoc = await db.collection("users").document(receiverId).get();
+      const receiverDoc = await db.collection("users").doc(receiverId).get();
       
       if (!receiverDoc.exists) {
         console.log(`[SEND_FAIL] Receiver ${receiverId} does not exist in Firestore.`);
@@ -150,7 +150,7 @@ async function sendToUser(messageData) {
           error.code === 'messaging/registration-token-not-registered') {
         console.log(`[CLEANUP] Token for user ${receiverId} is invalid/expired. Removing from Firestore...`);
         try {
-          await admin.firestore().collection("users").document(receiverId).update({
+          await admin.firestore().collection("users").doc(receiverId).update({
             fcmToken: admin.firestore.FieldValue.delete()
           });
           console.log(`[CLEANUP_SUCCESS] Removed invalid token for ${receiverId}.`);

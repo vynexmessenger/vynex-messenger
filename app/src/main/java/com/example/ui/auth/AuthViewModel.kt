@@ -171,13 +171,20 @@ class AuthViewModel(
         }
     }
     
-    fun updateUserSettings(notificationsEnabled: Boolean, readReceiptsEnabled: Boolean, showOnlineStatus: Boolean, appLockEnabled: Boolean) {
+    fun updateUserSettings(
+        notificationsEnabled: Boolean,
+        readReceiptsEnabled: Boolean,
+        showOnlineStatus: Boolean,
+        appLockEnabled: Boolean,
+        showMessageContent: Boolean = true
+    ) {
         val user = _authState.value.user ?: return
         val updatedSettings = user.settings.copy(
             notificationsEnabled = notificationsEnabled,
             readReceiptsEnabled = readReceiptsEnabled,
             showOnlineStatus = showOnlineStatus,
-            appLockEnabled = appLockEnabled
+            appLockEnabled = appLockEnabled,
+            showMessageContent = showMessageContent
         )
         val updatedUser = user.copy(settings = updatedSettings)
         viewModelScope.launch {

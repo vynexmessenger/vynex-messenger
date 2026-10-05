@@ -9,6 +9,7 @@ interface UserRepository {
     suspend fun getUserById(uid: String): Result<User>
     suspend fun updateUserProfile(user: User): Result<Unit>
     fun observeUserOnlineStatus(uid: String): Flow<Boolean>
+    fun observeUser(uid: String): Flow<com.example.data.model.User?>
     suspend fun setUserOnlineStatus(isOnline: Boolean)
     suspend fun blockUser(uid: String): Result<Unit>
     suspend fun unblockUser(uid: String): Result<Unit>

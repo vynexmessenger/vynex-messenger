@@ -61,8 +61,8 @@ fun AppLockScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Icon(
-                painter = painterResource(id = R.drawable.ic_vynex_logo),
-                contentDescription = "Vynex Logo",
+                painter = painterResource(id = R.drawable.ic_vynex_logo_lock),
+                contentDescription = "Vynex Lock Logo",
                 modifier = Modifier.size(80.dp),
                 tint = androidx.compose.ui.graphics.Color.Unspecified
             )

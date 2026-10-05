@@ -115,11 +115,29 @@ fun ProfileScreen(
                     }
                 }
 
+                var showViewer by remember { mutableStateOf(false) }
+
                 if (showPhotoDialog) {
                     AlertDialog(
                         onDismissRequest = { showPhotoDialog = false },
                         title = { Text("Profile Photo") },
-                        text = { Text("Choose an option for your profile photo.") },
+                        text = {
+                            Column {
+                                Text("Choose an option for your profile photo.")
+                                if (!user.profilePhoto.isNullOrEmpty()) {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    TextButton(
+                                        onClick = {
+                                            showPhotoDialog = false
+                                            showViewer = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("View Photo", color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        },
                         confirmButton = {
                             TextButton(onClick = {
                                 showPhotoDialog = false
@@ -141,7 +159,14 @@ fun ProfileScreen(
                 }
 
                 Box(modifier = Modifier.clickable { showPhotoDialog = true }) {
-                    AvatarImage(displayName = user.displayName.ifEmpty { user.username }, username = user.username, size = 120, profilePhoto = user.profilePhoto)
+                    AvatarImage(displayName = user.displayName.ifEmpty { user.canonicalUsername }, username = user.canonicalUsername, size = 120, profilePhoto = user.profilePhoto)
+                }
+                
+                if (showViewer && !user.profilePhoto.isNullOrEmpty()) {
+                    com.example.ui.components.MediaViewer(
+                        imageUrl = user.profilePhoto!!,
+                        onDismiss = { showViewer = false }
+                    )
                 }
                 
                 Spacer(modifier = Modifier.height(32.dp))
@@ -167,7 +192,7 @@ fun ProfileScreen(
                 
                 // 3. Username (Locked)
                 OutlinedTextField(
-                    value = user.username,
+                    value = user.canonicalUsername,
                     onValueChange = { },
                     label = { Text("Username") },
                     readOnly = true,
@@ -201,23 +226,7 @@ fun ProfileScreen(
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // 5. Date of Birth (Locked)
-                OutlinedTextField(
-                    value = user.dateOfBirth,
-                    onValueChange = { },
-                    label = { Text("Date of Birth") },
-                    readOnly = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    enabled = false,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        disabledTextColor = MaterialTheme.colorScheme.onBackground,
-                        disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                )
                 
-                Spacer(modifier = Modifier.height(16.dp))
                 
                 // 6. Bio (Editable)
                 OutlinedTextField(

@@ -66,20 +66,12 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(bottom = 48.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.ChatBubbleOutline,
-                    contentDescription = "Logo",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(40.dp)
-                )
-            }
+            Icon(
+                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_vynex_logo),
+                contentDescription = "Vynex Logo",
+                modifier = Modifier.size(64.dp),
+                tint = androidx.compose.ui.graphics.Color.Unspecified
+            )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = "Vynex Messenger",
