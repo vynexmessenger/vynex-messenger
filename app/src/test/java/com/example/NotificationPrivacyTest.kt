@@ -25,6 +25,14 @@ class NotificationPrivacyTest {
     @Before
     fun setup(): Unit = runBlocking {
         context = ApplicationProvider.getApplicationContext()
+        if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
+            val options = com.google.firebase.FirebaseOptions.Builder()
+                .setApplicationId("com.aistudio.vynexmessenger.prod")
+                .setApiKey("fake-api-key")
+                .setProjectId("vynex-mess-app")
+                .build()
+            com.google.firebase.FirebaseApp.initializeApp(context, options)
+        }
         appPreferences = AppPreferences(context)
         context.dataStore.edit { it.clear() }
     }

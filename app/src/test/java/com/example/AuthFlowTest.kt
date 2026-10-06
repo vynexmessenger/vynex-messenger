@@ -29,7 +29,12 @@ class AuthFlowTest {
     fun setup() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         if (FirebaseApp.getApps(context).isEmpty()) {
-            FirebaseApp.initializeApp(context)
+            val options = com.google.firebase.FirebaseOptions.Builder()
+                .setApplicationId("com.aistudio.vynexmessenger.prod")
+                .setApiKey("fake-api-key")
+                .setProjectId("vynex-mess-app")
+                .build()
+            FirebaseApp.initializeApp(context, options)
         }
         auth = FirebaseAuth.getInstance()
         firestore = FirebaseFirestore.getInstance()

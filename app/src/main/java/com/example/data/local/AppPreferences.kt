@@ -23,6 +23,7 @@ class AppPreferences(private val context: Context) {
         val SHOW_MESSAGE_CONTENT = booleanPreferencesKey("show_message_content")
         val UNREAD_NOTIFICATION_COUNT = intPreferencesKey("unread_notification_count")
         val LAST_NOTIFICATION_CHAT_ID = stringPreferencesKey("last_notification_chat_id")
+        val MUTED_CHATS_DEVICE = stringSetPreferencesKey("muted_chats_device")
     }
 
     val loggedInUidFlow: Flow<String?> = context.dataStore.data.map { preferences ->
@@ -106,30 +107,69 @@ class AppPreferences(private val context: Context) {
     private fun mutedChatsKey(uid: String) = stringSetPreferencesKey("muted_chats_$uid")
     private fun privateChatsKey(uid: String) = stringSetPreferencesKey("private_chats_$uid")
     private fun muteUntilKey(uid: String, chatId: String) = longPreferencesKey("mute_until_${uid}_$chatId")
+    private fun muteUntilDeviceKey(chatId: String) = longPreferencesKey("mute_until_device_$chatId")
+
+    suspend fun getChatMuteUntil(chatId: String, currentUid: String? = null): Long {
+        val prefs = context.dataStore.data.first()
+        val uid = currentUid ?: prefs[LOGGED_IN_UID]
+        if (uid != null && prefs.contains(muteUntilKey(uid, chatId))) {
+            return prefs[muteUntilKey(uid, chatId)] ?: 0L
+        }
+        return prefs[muteUntilDeviceKey(chatId)] ?: 0L
+    }
 
     suspend fun isChatMuted(chatId: String, currentUid: String? = null): Boolean {
         val prefs = context.dataStore.data.first()
-        val uid = currentUid ?: prefs[LOGGED_IN_UID] ?: return false
-        val mutedChats = prefs[mutedChatsKey(uid)] ?: emptySet()
-        if (!mutedChats.contains(chatId)) return false
-        val muteUntil = prefs[muteUntilKey(uid, chatId)] ?: 0L
-        if (muteUntil == -1L || muteUntil == 0L) return true
-        return System.currentTimeMillis() < muteUntil
+        val uid = currentUid ?: prefs[LOGGED_IN_UID]
+        val now = System.currentTimeMillis()
+
+        // 1. Strict user isolation if uid is known
+        if (uid != null) {
+            val mutedChats = prefs[mutedChatsKey(uid)] ?: emptySet()
+            if (!mutedChats.contains(chatId)) return false
+            val muteUntil = prefs[muteUntilKey(uid, chatId)] ?: 0L
+            if (muteUntil == -1L || muteUntil == 0L) return true
+            return now < muteUntil
+        }
+
+        // 2. Fallback to device-level mute setting ONLY when uid is completely unknown
+        val deviceMutedChats = prefs[MUTED_CHATS_DEVICE] ?: emptySet()
+        if (deviceMutedChats.contains(chatId)) {
+            val muteUntil = prefs[muteUntilDeviceKey(chatId)] ?: 0L
+            if (muteUntil == -1L || muteUntil == 0L) return true
+            return now < muteUntil
+        }
+
+        return false
     }
 
     suspend fun setChatMuted(chatId: String, isMuted: Boolean, muteUntil: Long = -1L, currentUid: String? = null) {
         android.util.Log.d("MUTE", "chatId = $chatId\nmuted = $isMuted")
-        val uid = currentUid ?: context.dataStore.data.first()[LOGGED_IN_UID] ?: return
+        val uid = currentUid ?: context.dataStore.data.first()[LOGGED_IN_UID]
         context.dataStore.edit { preferences ->
-            val set = (preferences[mutedChatsKey(uid)] ?: emptySet()).toMutableSet()
+            // Update device-level set
+            val deviceSet = (preferences[MUTED_CHATS_DEVICE] ?: emptySet()).toMutableSet()
             if (isMuted) {
-                set.add(chatId)
-                preferences[muteUntilKey(uid, chatId)] = muteUntil
+                deviceSet.add(chatId)
+                preferences[muteUntilDeviceKey(chatId)] = muteUntil
             } else {
-                set.remove(chatId)
-                preferences.remove(muteUntilKey(uid, chatId))
+                deviceSet.remove(chatId)
+                preferences.remove(muteUntilDeviceKey(chatId))
             }
-            preferences[mutedChatsKey(uid)] = set
+            preferences[MUTED_CHATS_DEVICE] = deviceSet
+
+            // Update user-level set if uid is known
+            if (uid != null) {
+                val userSet = (preferences[mutedChatsKey(uid)] ?: emptySet()).toMutableSet()
+                if (isMuted) {
+                    userSet.add(chatId)
+                    preferences[muteUntilKey(uid, chatId)] = muteUntil
+                } else {
+                    userSet.remove(chatId)
+                    preferences.remove(muteUntilKey(uid, chatId))
+                }
+                preferences[mutedChatsKey(uid)] = userSet
+            }
         }
     }
 

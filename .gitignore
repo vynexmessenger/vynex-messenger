@@ -16,3 +16,8 @@
 local.properties
 .env
 debug.keystore
+firebase-service-account.json
+vynex-backend/.env
+vynex-backend/storage/
+vynex-backend/node_modules/
+

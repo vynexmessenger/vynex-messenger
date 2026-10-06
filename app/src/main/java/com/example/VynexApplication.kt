@@ -49,6 +49,26 @@ class VynexApplication : Application(), DefaultLifecycleObserver {
         container = DefaultAppContainer(this)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
 
+        try {
+            if (com.google.firebase.FirebaseApp.getApps(this).isNotEmpty()) {
+                val auth = FirebaseAuth.getInstance()
+                auth.currentUser?.uid?.let { uid ->
+                    CoroutineScope(Dispatchers.IO).launch {
+                        container.appPreferences.saveSession(uid)
+                    }
+                }
+                auth.addAuthStateListener { firebaseAuth ->
+                    firebaseAuth.currentUser?.uid?.let { uid ->
+                        CoroutineScope(Dispatchers.IO).launch {
+                            container.appPreferences.saveSession(uid)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("VynexApp", "Firebase auth sync skipped: ${e.message}")
+        }
+
         // Keep FCM auto-init disabled to prevent background registration failure loops on devices/emulators without FCM registration support
         try {
             com.google.firebase.messaging.FirebaseMessaging.getInstance().isAutoInitEnabled = false

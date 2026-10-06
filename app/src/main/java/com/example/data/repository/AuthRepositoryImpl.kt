@@ -323,7 +323,7 @@ class AuthRepositoryImpl(
 
     override suspend fun updateUser(user: User): Result<Unit> {
         return try {
-            firestore.collection("users").document(user.uid).set(user).await()
+            firestore.collection("users").document(user.uid).set(user, SetOptions.merge()).await()
             Result.Success(Unit)
         } catch (e: Exception) {
             Result.Error(e.message ?: "Failed to update user")

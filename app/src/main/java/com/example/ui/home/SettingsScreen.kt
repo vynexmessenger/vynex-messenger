@@ -32,20 +32,11 @@ fun SettingsScreen(
     
     val context = androidx.compose.ui.platform.LocalContext.current
     val appPreferences = remember { com.example.data.local.AppPreferences(context) }
-    val showMessageContentPref by remember(user?.uid) { 
+    val showMessageContent by remember(user?.uid) { 
         appPreferences.getShowMessageContentFlow(user?.uid) 
     }.collectAsStateWithLifecycle(initialValue = user?.settings?.showMessageContent ?: true)
     
-    var showMessageContent by remember(showMessageContentPref) { mutableStateOf(showMessageContentPref) }
     val coroutineScope = rememberCoroutineScope()
-    
-    LaunchedEffect(user?.settings?.showMessageContent) {
-        val serverSetting = user?.settings?.showMessageContent
-        if (serverSetting != null) {
-            showMessageContent = serverSetting
-            appPreferences.setShowMessageContent(serverSetting, user?.uid)
-        }
-    }
     
     var notificationsEnabled by remember { mutableStateOf(user?.settings?.notificationsEnabled ?: true) }
     var readReceiptsEnabled by remember { mutableStateOf(user?.settings?.readReceiptsEnabled ?: true) }
@@ -206,7 +197,6 @@ fun SettingsScreen(
                     subtitle = "Show sender name and message text in notifications",
                     checked = showMessageContent,
                     onCheckedChange = { checked ->
-                        showMessageContent = checked
                         coroutineScope.launch {
                             appPreferences.setShowMessageContent(checked, user?.uid)
                         }

@@ -1,15 +1,18 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+require("dotenv").config({ path: path.join(__dirname, ".env"), override: true });
+const express = require("express");
+const cors = require("cors");
 const multer = require("multer");
 const admin = require("firebase-admin");
 
 const app = express();
 const PORT = process.env.PORT || 8081;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-const STORAGE_PATH = process.env.STORAGE_PATH || path.join(__dirname, "storage");
+const rawStoragePath = process.env.STORAGE_PATH || "./storage";
+const STORAGE_PATH = path.isAbsolute(rawStoragePath)
+  ? rawStoragePath
+  : path.resolve(__dirname, rawStoragePath);
 
 // Ensure storage directories exist
 const profileDir = path.join(STORAGE_PATH, "profile_photos");
@@ -24,24 +27,39 @@ app.use(express.json());
 // 1. Firebase Admin Initialization (for FCM Notifications)
 // ----------------------------------------------------
 let firebaseInitialized = false;
-const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+let hasValidCredentials = false;
+const rawServiceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+const serviceAccountPath = rawServiceAccountPath
+  ? (path.isAbsolute(rawServiceAccountPath) ? rawServiceAccountPath : path.resolve(__dirname, rawServiceAccountPath))
+  : null;
+const projectId = process.env.FIREBASE_PROJECT_ID || "vynex-mess-app";
 
 try {
   if (serviceAccountPath && fs.existsSync(serviceAccountPath)) {
     const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+      credential: admin.credential.cert(serviceAccount),
+      projectId: serviceAccount.project_id || projectId
     });
     firebaseInitialized = true;
-    console.log("[FIREBASE] Initialized with service account file.");
+    hasValidCredentials = true;
+    console.log(`[FIREBASE] Initialized with service account file for project: ${serviceAccount.project_id || projectId}`);
   } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     admin.initializeApp({
-      credential: admin.credential.applicationDefault()
+      credential: admin.credential.applicationDefault(),
+      projectId: projectId
     });
     firebaseInitialized = true;
-    console.log("[FIREBASE] Initialized with application default credentials.");
+    hasValidCredentials = true;
+    console.log(`[FIREBASE] Initialized with application default credentials for project: ${projectId}`);
+  } else if (projectId) {
+    admin.initializeApp({
+      projectId: projectId
+    });
+    firebaseInitialized = true;
+    console.log(`[FIREBASE] Initialized with Project ID: ${projectId}`);
+    console.log("[FIREBASE_NOTICE] Place firebase-service-account.json in vynex-backend/ to enable Firestore listener and FCM push notifications.");
   } else {
-    // Attempt default initialization if running in cloud or ambient environment
     admin.initializeApp();
     firebaseInitialized = true;
     console.log("[FIREBASE] Initialized with ambient project credentials.");
@@ -199,6 +217,11 @@ function startNotificationListener() {
     console.log("[LISTENER_SKIP] Firebase not initialized. Notification listener skipped.");
     return;
   }
+  if (!hasValidCredentials) {
+    console.log("[LISTENER_NOTICE] Notification listener paused: firebase-service-account.json is required for Firestore collection listener.");
+    console.log("[LISTENER_NOTICE] Media upload and storage APIs (/api/profile, /api/chat) are fully active.");
+    return;
+  }
 
   console.log("[LISTENER] Starting Firestore listener on collectionGroup('messages')...");
   const db = admin.firestore();
@@ -222,7 +245,11 @@ function startNotificationListener() {
     },
     (error) => {
       console.error("[LISTENER_ERROR] Error listening to messages:", error.message);
-      setTimeout(startNotificationListener, 5000);
+      if (error.message && (error.message.includes("Project Id") || error.message.includes("Could not load the default credentials") || error.message.includes("PERMISSION_DENIED"))) {
+        console.error("[LISTENER_ERROR] Authentication failed. Ensure firebase-service-account.json is placed in vynex-backend/.");
+      } else {
+        setTimeout(startNotificationListener, 15000);
+      }
     }
   );
 }

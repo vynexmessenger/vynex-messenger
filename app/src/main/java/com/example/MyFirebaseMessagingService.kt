@@ -56,14 +56,35 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         }
         
         val appPreferences = com.example.data.local.AppPreferences(applicationContext)
-        val currentUid = FirebaseAuth.getInstance().currentUser?.uid 
-            ?: try { kotlinx.coroutines.runBlocking { appPreferences.getLoggedInUid() } } catch (e: Exception) { null }
+        var currentUid = FirebaseAuth.getInstance().currentUser?.uid
+        if (currentUid.isNullOrEmpty()) {
+            currentUid = try { kotlinx.coroutines.runBlocking { appPreferences.getLoggedInUid() } } catch (e: Exception) { null }
+        }
+        // If UID is still unknown (e.g. background wake-up before Firebase Auth token reload), resolve recipient from chat doc
+        if (currentUid.isNullOrEmpty() && !chatId.isNullOrEmpty()) {
+            try {
+                kotlinx.coroutines.runBlocking {
+                    val chatDoc = FirebaseFirestore.getInstance().collection("chats").document(chatId).get().await()
+                    val participants = chatDoc.get("participants") as? List<*>
+                    val resolved = participants?.firstOrNull { it != senderId } as? String
+                    if (!resolved.isNullOrEmpty()) {
+                        currentUid = resolved
+                        appPreferences.saveSession(resolved)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("FCM_AUDIT", "Could not resolve recipient from chat doc: ${e.message}")
+            }
+        }
+
+        var storedMuteUntil = 0L
 
         // Check if chat is muted for current user
         val isMuted = if (chatId != null) {
             try {
                 kotlinx.coroutines.runBlocking {
                     val localMuted = appPreferences.isChatMuted(chatId, currentUid)
+                    storedMuteUntil = appPreferences.getChatMuteUntil(chatId, currentUid)
                     if (localMuted) {
                         true
                     } else if (currentUid != null) {
@@ -76,6 +97,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                         val muteUntil = (chatSettingsMap?.get("muteUntil") as? Number)?.toLong() ?: 0L
                         if (isMutedField) {
                             if (muteUntil == -1L || muteUntil == 0L || System.currentTimeMillis() < muteUntil) {
+                                storedMuteUntil = muteUntil
                                 appPreferences.setChatMuted(chatId, true, muteUntil, currentUid)
                                 true
                             } else false
@@ -89,6 +111,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                                 val subIsMuted = doc.getBoolean("isMuted") ?: false
                                 val subMuteUntil = doc.getLong("muteUntil") ?: 0L
                                 if (subIsMuted && (subMuteUntil == -1L || subMuteUntil == 0L || System.currentTimeMillis() < subMuteUntil)) {
+                                    storedMuteUntil = subMuteUntil
                                     appPreferences.setChatMuted(chatId, true, subMuteUntil, currentUid)
                                     true
                                 } else false
@@ -103,6 +126,16 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             }
         } else false
 
+        Log.d("MUTE_DEBUG", """
+            [MUTE_DEBUG]
+            uid = $currentUid
+            incomingChatId = $chatId
+            storedMuted = $isMuted
+            muteUntil = $storedMuteUntil
+            currentTime = ${System.currentTimeMillis()}
+            isMuted = $isMuted
+        """.trimIndent())
+
         val showMessageContent = try {
             kotlinx.coroutines.runBlocking {
                 appPreferences.getShowMessageContent(currentUid)
@@ -112,10 +145,27 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         }
 
         val isViewingActiveChat = ActiveChatTracker.isAppInForeground && ActiveChatTracker.activeChatId == chatId
-        val shouldNotify = !isMuted && !isViewingActiveChat
+        val shouldNotify = !isViewingActiveChat && !isMuted
 
-        Log.d("NOTIFICATION_DECISION", "chatId = ${chatId ?: "none"}\nmuted = $isMuted\nshowMessageContent = $showMessageContent")
-        Log.d("NOTIFICATION_DECISION", "shouldNotify = $shouldNotify")
+        val notificationMode = when {
+            !shouldNotify -> "NONE"
+            showMessageContent -> "CONTENT"
+            else -> "GENERIC"
+        }
+
+        Log.d("NOTIF_DEBUG", """
+            [NOTIF_DEBUG]
+            uid=$currentUid
+            chatId=$chatId
+            muteUntil=$storedMuteUntil
+            isMuted=$isMuted
+            showMessageContent=$showMessageContent
+            activeChat=$isViewingActiveChat
+            shouldNotify=$shouldNotify
+            notificationMode=$notificationMode
+            notificationPath=MyFirebaseMessagingService
+            messageContentPresent=${!body.isNullOrEmpty()}
+        """.trimIndent())
 
         if (!shouldNotify) {
             if (isMuted) {
